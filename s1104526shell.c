@@ -151,6 +151,7 @@ int main() {
         }
 
         int out = -1;
+        int stdout_copy = dup(STDOUT_FILENO);
         for (int i = 0; args[i] != NULL; i++) {
             if (strcmp(args[i], ">") == 0) {
                 args[i] = NULL;
@@ -166,6 +167,7 @@ int main() {
 
         if (strcmp(args[0], "s1104526") == 0) {
             execute_s1104526();
+            dup2(stdout_copy, STDOUT_FILENO);
             continue;
         }
 
@@ -174,6 +176,8 @@ int main() {
         } else {
             execute_command(args, background);
         }
+
+        dup2(stdout_copy, STDOUT_FILENO);
     }
 
     return 0;
