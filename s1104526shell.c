@@ -1,55 +1,86 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <fcntl.h>
 
-#define MAX_LINE 80 /* The maximum length command */
+#define MAX_LINE 80
+#define MAX_NUM_ARGS 10
 
-void parse_args(char *line, char **argv) {
-    while (*line != '\0') {
-        while (*line == ' ' || *line == '\t' || *line == '\n')
-            *line++ = '\0';
-        *argv++ = line;
-        while (*line != '\0' && *line != ' ' && *line != '\t' && *line != '\n') 
-            line++;
+size_t string_parser(char *input, char *word_array[]) {
+    size_t n = 0;
+    while (*input) {
+        while (isspace((unsigned char)*input))
+            ++input;
+        if (*input) {
+            word_array[n++] = (char *)input;
+            while (*input && !isspace((unsigned char)*input))
+                ++input;
+            *(input) = '\0';
+            ++input;
+        }
     }
-    *argv = '\0';
+    word_array[n] = NULL;
+    return n;
 }
 
-void execute(char **argv) {
+void execute_command(char **args, int background) {
     pid_t pid;
     int status;
 
-    if ((pid = fork()) < 0) {
-        printf("Fork error\n");
-        exit(1);
-    }
-    else if (pid == 0) {
-        if (execvp(*argv, argv) < 0) {
-            printf("Execvp error\n");
-            exit(1);
+    pid = fork();
+    if (pid == 0) {
+        if (execvp(args[0], args) == -1) {
+            perror("Error");
         }
-    }
-    else {
-        while (wait(&status) != pid);
+        exit(EXIT_FAILURE);
+    } else if (pid < 0) {
+        perror("Error");
+    } else {
+        if (!background)
+            do {
+                waitpid(pid, &status, WUNTRACED);
+            } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
 }
 
-void execute_with_pipe(char **argv, char **argv2) {
+void redirect(char **args, char *input_file, char *output_file, int option) {
+    pid_t pid;
+    int file_descriptor; 
+
+    pid = fork();
+    if (pid == 0) {
+        if (option == 0) {
+            file_descriptor = open(output_file, O_CREAT | O_TRUNC | O_WRONLY, 0600); 
+            dup2(file_descriptor, STDOUT_FILENO); 
+            close(file_descriptor);
+        } else if (option == 1) {
+            file_descriptor = open(input_file, O_RDONLY, 0600);  
+            dup2(file_descriptor, STDIN_FILENO); 
+            close(file_descriptor);
+        }
+        if (execvp(args[0], args) == -1) {
+            perror("Error");
+        }
+        exit(EXIT_FAILURE);
+    } else {
+        wait(NULL);
+    }
+}
+
+void pipe_command(char **args, char **args_pipe) {
     int pipefd[2];
     pid_t p1, p2;
 
     if (pipe(pipefd) < 0) {
-        printf("Pipe error\n");
-        exit(1);
+        printf("\nPipe could not be initialized");
+        return;
     }
     p1 = fork();
     if (p1 < 0) {
-        printf("Fork error\n");
-        exit(1);
+        printf("\nCould not fork");
+        return;
     }
 
     if (p1 == 0) {
@@ -57,16 +88,16 @@ void execute_with_pipe(char **argv, char **argv2) {
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
 
-        if (execvp(argv[0], argv) < 0) {
-            printf("Execvp error\n");
-            exit(1);
+        if (execvp(args[0], args) < 0) {
+            printf("\nCould not execute command 1..");
+            exit(0);
         }
     } else {
         p2 = fork();
 
         if (p2 < 0) {
-            printf("Fork error\n");
-            exit(1);
+            printf("\nCould not fork");
+            return;
         }
 
         if (p2 == 0) {
@@ -74,9 +105,9 @@ void execute_with_pipe(char **argv, char **argv2) {
             dup2(pipefd[0], STDIN_FILENO);
             close(pipefd[0]);
 
-            if (execvp(argv2[0], argv2) < 0) {
-                printf("Execvp error\n");
-                exit(1);
+            if (execvp(args_pipe[0], args_pipe) < 0) {
+                printf("\nCould not execute command 2..");
+                exit(0);
             }
         } else {
             wait(NULL);
@@ -85,83 +116,82 @@ void execute_with_pipe(char **argv, char **argv2) {
     }
 }
 
-void execute_with_redirection(char **argv, char *file, int mode) {
-    pid_t pid;
-    int fd;
-
-    if ((pid = fork()) < 0) {
-        printf("Fork error\n");
-        exit(1);
-    }
-    else if (pid == 0) {
-        if (mode == 0) {
-            fd = open(file, O_RDONLY);
-            dup2(fd, STDIN_FILENO);
-        } else {
-            fd = open(file, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-            dup2(fd, STDOUT_FILENO);
-        }
-        close(fd);
-        if (execvp(argv[0], argv) < 0) {
-            printf("Execvp error\n");
-            exit(1);
-        }
-    }
-    else {
-        wait(NULL);
-    }
-}
-
-void execute_in_background(char **argv) {
-    pid_t pid;
-
-    if ((pid = fork()) < 0) {
-        printf("Fork error\n");
-        exit(1);
-    }
-    else if (pid == 0) {
-        if (execvp(argv[0], argv) < 0) {
-            printf("Execvp error\n");
-            exit(1);
-        }
-    }
-}
-
-void execute_special_command() {
-    printf("Your UID is %d\n", getuid());
-}
-
-int main(void) {
-    char line[MAX_LINE];
-    char *argv[MAX_LINE/2 + 1];
-    char *argv2[MAX_LINE/2 + 1];
-    char *file;
-    int mode;
+int main() {
+    char input_string[MAX_LINE]; 
+    char *tokens[MAX_NUM_ARGS];
+    char *input_file = NULL;
+    char *output_file = NULL;
+    char *args[MAX_NUM_ARGS];
+    char *args_pipe[MAX_NUM_ARGS];
+    int numTokens;
+    int background = 0;
+    int redirect_in = 0;
+    int redirect_out = 0;
+    int pipe_flag = 0;
 
     while (1) {
-        printf("Shell> ");
-        fgets(line, sizeof(line), stdin);
-        parse_args(line, argv);
-        if (strcmp(argv[0], "exit") == 0) 
-            exit(0);
-        else if (strcmp(argv[0], "s1104526") == 0)
-            execute_special_command();
-        else if (strchr(line, '|') != NULL) {
-            parse_args(strchr(line, '|') + 1, argv2);
-            execute_with_pipe(argv, argv2);
-        } else if (strchr(line, '>') != NULL) {
-            file = strchr(line, '>') + 1;
-            mode = 1;
-            execute_with_redirection(argv, file, mode);
-        } else if (strchr(line, '<') != NULL) {
-            file = strchr(line, '<') + 1;
-            mode = 0;
-            execute_with_redirection(argv, file, mode);
-        } else if (strchr(line, '&') != NULL) {
-            execute_in_background(argv);
-        } else {
-            execute(argv);
+        background = 0;
+        printf("s1104526shell> ");
+        gets(input_string);
+        numTokens = string_parser(input_string, tokens);
+
+        if (strcmp(tokens[0], "exit") == 0)
+            break;
+
+        for (int i = 0; i < numTokens; i++) {
+            if (strcmp(tokens[i], ">") == 0) {
+                output_file = tokens[i + 1];
+                redirect_out = 1;
+                tokens[i] = NULL;
+            }
+
+            if (strcmp(tokens[i], "<") == 0) {
+                input_file = tokens[i + 1];
+                redirect_in = 1;
+                tokens[i] = NULL;
+            }
+
+            if (strcmp(tokens[i], "|") == 0) {
+                tokens[i] = NULL;
+                pipe_flag = 1;
+                int j = 0;
+                for (j = i + 1; j < numTokens; j++) {
+                    args_pipe[j - i - 1] = tokens[j];
+                }
+                args_pipe[j - i - 1] = NULL;
+            }
+
+            if (strcmp(tokens[i], "&") == 0) {
+                background = 1;
+                tokens[i] = NULL;
+            }
         }
+
+        for (int i = 0; i < numTokens; i++) {
+            args[i] = tokens[i];
+        }
+
+        if (strcmp(args[0], "s1104526") == 0) {
+            printf("your uid is %d\n", getuid());
+            continue;
+        }
+
+        if (pipe_flag) {
+            pipe_command(args, args_pipe);
+            continue;
+        }
+
+        if (redirect_out) {
+            redirect(args, NULL, output_file, 0);
+            continue;
+        }
+
+        if (redirect_in) {
+            redirect(args, input_file, NULL, 1);
+            continue;
+        }
+
+        execute_command(args, background);
     }
 
     return 0;
