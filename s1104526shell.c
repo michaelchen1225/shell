@@ -1,183 +1,150 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <fcntl.h>
 
-#define MAX_INPUT_SIZE 1024
-#define MAX_ARG_SIZE 64
-#define MAX_ARG_COUNT 16
+#define MAX_LINE 80
+#define MAX_NUM_ARGS 10
 
-void execute_command(char *args[], int background) {
-    pid_t pid = fork();
+size_t string_parser(char* input, char* word_array[]) {
+    size_t n = 0;
+    while (*input) {
+        while (isspace((unsigned char)*input))
+            ++input;
+        if (*input) {
+            word_array[n++] = (char*)input;
+            while (*input && !isspace((unsigned char)*input))
+                ++input;
+            *(input) = '\0';
+            ++input;
+        }
+    }
+    word_array[n] = NULL;
+    return n;
+}
 
-    if (pid < 0) {
-        perror("Fork failed");
+void execute_command(char** args, int background) {
+    pid_t pid;
+    int status;
+
+    pid = fork();
+    if (pid == 0) {
+        if (execvp(args[0], args) == -1) {
+            perror("1104526shell");
+        }
         exit(EXIT_FAILURE);
-    } else if (pid == 0) {
-        // Child process
-        execvp(args[0], args);
-        perror("Execution failed");
-        exit(EXIT_FAILURE);
+    } else if (pid < 0) {
+        perror("1104526shell");
     } else {
-        // Parent process
         if (!background) {
-            waitpid(pid, NULL, 0);
+            do {
+                waitpid(pid, &status, WUNTRACED);
+            } while (!WIFEXITED(status) && !WIFSIGNALED(status));
         }
     }
 }
 
-void execute_pipeline(char *cmd1[], char *cmd2[]) {
-    int pipe_fd[2];
-    pid_t pid1, pid2;
+void execute_pipe(char** args, char** args_pipe) {
+    int pipefd[2];
+    pid_t p1, p2;
 
-    if (pipe(pipe_fd) < 0) {
-        perror("Pipe creation failed");
-        exit(EXIT_FAILURE);
+    if (pipe(pipefd) < 0) {
+        printf("\nPipe could not be initialized");
+        return;
+    }
+    p1 = fork();
+    if (p1 < 0) {
+        printf("\nCould not fork");
+        return;
     }
 
-    pid1 = fork();
-    if (pid1 < 0) {
-        perror("Fork failed");
-        exit(EXIT_FAILURE);
-    } else if (pid1 == 0) {
-        // Child process 1
-        close(pipe_fd[0]); // Close unused read end
-        dup2(pipe_fd[1], STDOUT_FILENO);
-        close(pipe_fd[1]);
+    if (p1 == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
 
-        execvp(cmd1[0], cmd1);
-        perror("Execution failed");
-        exit(EXIT_FAILURE);
+        if (execvp(args[0], args) < 0) {
+            printf("\nCould not execute command 1..");
+            exit(0);
+        }
     } else {
-        pid2 = fork();
-        if (pid2 < 0) {
-            perror("Fork failed");
-            exit(EXIT_FAILURE);
-        } else if (pid2 == 0) {
-            // Child process 2
-            close(pipe_fd[1]); // Close unused write end
-            dup2(pipe_fd[0], STDIN_FILENO);
-            close(pipe_fd[0]);
+        p2 = fork();
 
-            execvp(cmd2[0], cmd2);
-            perror("Execution failed");
-            exit(EXIT_FAILURE);
+        if (p2 < 0) {
+            printf("\nCould not fork");
+            return;
+        }
+
+        if (p2 == 0) {
+            close(pipefd[1]);
+            dup2(pipefd[0], STDIN_FILENO);
+            close(pipefd[0]);
+            if (execvp(args_pipe[0], args_pipe) < 0) {
+                printf("\nCould not execute command 2..");
+                exit(0);
+            }
         } else {
-            // Parent process
-            close(pipe_fd[0]);
-            close(pipe_fd[1]);
-
-            waitpid(pid1, NULL, 0);
-            waitpid(pid2, NULL, 0);
+            wait(NULL);
+            wait(NULL);
         }
     }
 }
 
-void redirect_input_output(char *input_file, char *output_file) {
-    int input_fd, output_fd;
-
-    if (input_file != NULL) {
-        input_fd = open(input_file, O_RDONLY);
-        if (input_fd < 0) {
-            perror("Input file open failed");
-            exit(EXIT_FAILURE);
-        }
-        dup2(input_fd, STDIN_FILENO);
-        close(input_fd);
-    }
-
-    if (output_file != NULL) {
-        output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-        if (output_fd < 0) {
-            perror("Output file open failed");
-            exit(EXIT_FAILURE);
-        }
-        dup2(output_fd, STDOUT_FILENO);
-        close(output_fd);
-    }
+void execute_s1104526() {
+    printf("Your UID is %d\n", getuid());
 }
 
 int main() {
-    char input[MAX_INPUT_SIZE];
-    char *args[MAX_ARG_COUNT];
-    char *cmd1[MAX_ARG_COUNT];
-    char *cmd2[MAX_ARG_COUNT];
-    char *input_file = NULL;
-    char *output_file = NULL;
+    char input_buffer[MAX_LINE];
+    char* args[MAX_NUM_ARGS];
+    char* args_pipe[MAX_NUM_ARGS];
+    int should_run = 1;
     int background = 0;
+    int pipe = 0;
 
-    while (1) {
-        printf("Shell> ");
-        fgets(input, MAX_INPUT_SIZE, stdin);
-        input[strcspn(input, "\n")] = '\0'; // Remove trailing newline
+    printf("Welcome to 1104526shell\n");
 
-        // Parse input
-        char *token = strtok(input, " ");
-        int i = 0;
-        while (token != NULL) {
-            args[i++] = token;
-            token = strtok(NULL, " ");
-        }
-        args[i] = NULL;
+    while (should_run) {
+        printf("1104526shell> ");
+        fgets(input_buffer, MAX_LINE, stdin);
+        input_buffer[strcspn(input_buffer, "\n")] = 0;
 
-        // Check for special command
-        if (strcmp(args[0], "s1104526") == 0) {
-            printf("Your UID is %d\n", getuid());
+        if (strcmp(input_buffer, "exit") == 0) {
+            should_run = 0;
             continue;
         }
 
-        // Check for background execution
-        if (i > 0 && strcmp(args[i - 1], "&") == 0) {
+        if (strcmp(input_buffer, "s1104526") == 0) {
+            execute_s1104526();
+            continue;
+        }
+
+        char* next = strchr(input_buffer, '&');
+        if (next) {
             background = 1;
-            args[i - 1] = NULL; // Remove the "&" from args
-        }
-
-        // Check for input/output redirection
-        for (int j = 0; j < i; j++) {
-            if (strcmp(args[j], "<") == 0) {
-                input_file = args[j + 1];
-                args[j] = NULL;
-            } else if (strcmp(args[j], ">") == 0) {
-                output_file = args[j + 1];
-                args[j] = NULL;
-            }
-        }
-
-        // Check for pipeline
-        int pipe_index = -1;
-        for (int j = 0; j < i; j++) {
-            if (strcmp(args[j], "|") == 0) {
-                pipe_index = j;
-                break;
-            }
-        }
-
-        if (pipe_index >= 0) {
-            for (int j = 0; j < pipe_index; j++) {
-                cmd1[j] = args[j];
-            }
-            cmd1[pipe_index] = NULL;
-
-            int k = 0;
-            for (int j = pipe_index + 1; j < i; j++) {
-                cmd2[k++] = args[j];
-            }
-            cmd2[k] = NULL;
-
-            execute_pipeline(cmd1, cmd2);
+            *next = ' ';
         } else {
-            // Execute single process command
-            redirect_input_output(input_file, output_file);
+            background = 0;
+        }
+
+        next = strchr(input_buffer, '|');
+        if (next) {
+            pipe = 1;
+            *next = '\0';
+            string_parser(input_buffer, args);
+            string_parser(next + 1, args_pipe);
+        } else {
+            pipe = 0;
+            string_parser(input_buffer, args);
+        }
+
+        if (pipe) {
+            execute_pipe(args, args_pipe);
+        } else {
             execute_command(args, background);
         }
-
-        // Reset variables for the next iteration
-        input_file = NULL;
-        output_file = NULL;
-        background = 0;
     }
 
     return 0;
