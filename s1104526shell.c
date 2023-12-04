@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <ctype.h>  // Added this line
 
 #define MAX_LINE 80
 #define MAX_NUM_ARGS 10
@@ -24,6 +25,7 @@ size_t string_parser(char* input, char* word_array[]) {
     word_array[n] = NULL;
     return n;
 }
+// Rest of the code...
 
 void execute_command(char** args, int background) {
     pid_t pid;
