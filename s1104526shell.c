@@ -1,198 +1,183 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
 
-#define MAX_LINE 80
-#define MAX_NUM_ARGS 10
+#define MAX_INPUT_SIZE 1024
+#define MAX_ARG_SIZE 64
+#define MAX_ARG_COUNT 16
 
-size_t string_parser(char *input, char *word_array[]) {
-    size_t n = 0;
-    while (*input) {
-        while (isspace((unsigned char)*input))
-            ++input;
-        if (*input) {
-            word_array[n++] = (char *)input;
-            while (*input && !isspace((unsigned char)*input))
-                ++input;
-            *(input) = '\0';
-            ++input;
-        }
-    }
-    word_array[n] = NULL;
-    return n;
-}
+void execute_command(char *args[], int background) {
+    pid_t pid = fork();
 
-void execute_command(char **args, int background) {
-    pid_t pid;
-    int status;
-
-    pid = fork();
-    if (pid == 0) {
-        if (execvp(args[0], args) == -1) {
-            perror("Error");
-        }
+    if (pid < 0) {
+        perror("Fork failed");
         exit(EXIT_FAILURE);
-    } else if (pid < 0) {
-        perror("Error");
-    } else {
-        if (!background)
-            do {
-                waitpid(pid, &status, WUNTRACED);
-            } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-    }
-}
-
-void redirect(char **args, char *input_file, char *output_file, int option) {
-    pid_t pid;
-    int file_descriptor; 
-
-    pid = fork();
-    if (pid == 0) {
-        if (option == 0) {
-            file_descriptor = open(output_file, O_CREAT | O_TRUNC | O_WRONLY, 0600); 
-            dup2(file_descriptor, STDOUT_FILENO); 
-            close(file_descriptor);
-        } else if (option == 1) {
-            file_descriptor = open(input_file, O_RDONLY, 0600);  
-            dup2(file_descriptor, STDIN_FILENO); 
-            close(file_descriptor);
-        }
-        if (execvp(args[0], args) == -1) {
-            perror("Error");
-        }
+    } else if (pid == 0) {
+        // Child process
+        execvp(args[0], args);
+        perror("Execution failed");
         exit(EXIT_FAILURE);
     } else {
-        wait(NULL);
+        // Parent process
+        if (!background) {
+            waitpid(pid, NULL, 0);
+        }
     }
 }
 
-void pipe_command(char **args, char **args_pipe) {
-    int pipefd[2];
-    pid_t p1, p2;
+void execute_pipeline(char *cmd1[], char *cmd2[]) {
+    int pipe_fd[2];
+    pid_t pid1, pid2;
 
-    if (pipe(pipefd) < 0) {
-        printf("\nPipe could not be initialized");
-        return;
-    }
-    p1 = fork();
-    if (p1 < 0) {
-        printf("\nCould not fork");
-        return;
+    if (pipe(pipe_fd) < 0) {
+        perror("Pipe creation failed");
+        exit(EXIT_FAILURE);
     }
 
-    if (p1 == 0) {
-        close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        close(pipefd[1]);
+    pid1 = fork();
+    if (pid1 < 0) {
+        perror("Fork failed");
+        exit(EXIT_FAILURE);
+    } else if (pid1 == 0) {
+        // Child process 1
+        close(pipe_fd[0]); // Close unused read end
+        dup2(pipe_fd[1], STDOUT_FILENO);
+        close(pipe_fd[1]);
 
-        if (execvp(args[0], args) < 0) {
-            printf("\nCould not execute command 1..");
-            exit(0);
-        }
+        execvp(cmd1[0], cmd1);
+        perror("Execution failed");
+        exit(EXIT_FAILURE);
     } else {
-        p2 = fork();
+        pid2 = fork();
+        if (pid2 < 0) {
+            perror("Fork failed");
+            exit(EXIT_FAILURE);
+        } else if (pid2 == 0) {
+            // Child process 2
+            close(pipe_fd[1]); // Close unused write end
+            dup2(pipe_fd[0], STDIN_FILENO);
+            close(pipe_fd[0]);
 
-        if (p2 < 0) {
-            printf("\nCould not fork");
-            return;
-        }
-
-        if (p2 == 0) {
-            close(pipefd[1]);
-            dup2(pipefd[0], STDIN_FILENO);
-            close(pipefd[0]);
-
-            if (execvp(args_pipe[0], args_pipe) < 0) {
-                printf("\nCould not execute command 2..");
-                exit(0);
-            }
+            execvp(cmd2[0], cmd2);
+            perror("Execution failed");
+            exit(EXIT_FAILURE);
         } else {
-            wait(NULL);
-            wait(NULL);
+            // Parent process
+            close(pipe_fd[0]);
+            close(pipe_fd[1]);
+
+            waitpid(pid1, NULL, 0);
+            waitpid(pid2, NULL, 0);
         }
+    }
+}
+
+void redirect_input_output(char *input_file, char *output_file) {
+    int input_fd, output_fd;
+
+    if (input_file != NULL) {
+        input_fd = open(input_file, O_RDONLY);
+        if (input_fd < 0) {
+            perror("Input file open failed");
+            exit(EXIT_FAILURE);
+        }
+        dup2(input_fd, STDIN_FILENO);
+        close(input_fd);
+    }
+
+    if (output_file != NULL) {
+        output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (output_fd < 0) {
+            perror("Output file open failed");
+            exit(EXIT_FAILURE);
+        }
+        dup2(output_fd, STDOUT_FILENO);
+        close(output_fd);
     }
 }
 
 int main() {
-    char input_string[MAX_LINE]; 
-    char *tokens[MAX_NUM_ARGS];
+    char input[MAX_INPUT_SIZE];
+    char *args[MAX_ARG_COUNT];
+    char *cmd1[MAX_ARG_COUNT];
+    char *cmd2[MAX_ARG_COUNT];
     char *input_file = NULL;
     char *output_file = NULL;
-    char *args[MAX_NUM_ARGS];
-    char *args_pipe[MAX_NUM_ARGS];
-    int numTokens;
     int background = 0;
-    int redirect_in = 0;
-    int redirect_out = 0;
-    int pipe_flag = 0;
 
     while (1) {
-        background = 0;
-        printf("s1104526shell> ");
-        fgets(input_string, sizeof(input_string), stdin);
-        input_string[strcspn(input_string, "\n")] = 0;
-        numTokens = string_parser(input_string, tokens);
+        printf("Shell> ");
+        fgets(input, MAX_INPUT_SIZE, stdin);
+        input[strcspn(input, "\n")] = '\0'; // Remove trailing newline
 
-        if (strcmp(tokens[0], "exit") == 0)
-            break;
-
-        for (int i = 0; i < numTokens; i++) {
-            if (strcmp(tokens[i], ">") == 0) {
-                output_file = tokens[i + 1];
-                redirect_out = 1;
-                tokens[i] = NULL;
-            }
-
-            if (strcmp(tokens[i], "<") == 0) {
-                input_file = tokens[i + 1];
-                redirect_in = 1;
-                tokens[i] = NULL;
-            }
-
-            if (strcmp(tokens[i], "|") == 0) {
-                tokens[i] = NULL;
-                pipe_flag = 1;
-                int j = 0;
-                for (j = i + 1; j < numTokens; j++) {
-                    args_pipe[j - i - 1] = tokens[j];
-                }
-                args_pipe[j - i - 1] = NULL;
-            }
-
-            if (strcmp(tokens[i], "&") == 0) {
-                background = 1;
-                tokens[i] = NULL;
-            }
+        // Parse input
+        char *token = strtok(input, " ");
+        int i = 0;
+        while (token != NULL) {
+            args[i++] = token;
+            token = strtok(NULL, " ");
         }
+        args[i] = NULL;
 
-        for (int i = 0; i < numTokens; i++) {
-            args[i] = tokens[i];
-        }
-
+        // Check for special command
         if (strcmp(args[0], "s1104526") == 0) {
-            printf("your uid is %d\n", getuid());
+            printf("Your UID is %d\n", getuid());
             continue;
         }
 
-        if (pipe_flag) {
-            pipe_command(args, args_pipe);
-            continue;
+        // Check for background execution
+        if (i > 0 && strcmp(args[i - 1], "&") == 0) {
+            background = 1;
+            args[i - 1] = NULL; // Remove the "&" from args
         }
 
-        if (redirect_out) {
-            redirect(args, NULL, output_file, 0);
-            continue;
+        // Check for input/output redirection
+        for (int j = 0; j < i; j++) {
+            if (strcmp(args[j], "<") == 0) {
+                input_file = args[j + 1];
+                args[j] = NULL;
+            } else if (strcmp(args[j], ">") == 0) {
+                output_file = args[j + 1];
+                args[j] = NULL;
+            }
         }
 
-        if (redirect_in) {
-            redirect(args, input_file, NULL, 1);
-            continue;
+        // Check for pipeline
+        int pipe_index = -1;
+        for (int j = 0; j < i; j++) {
+            if (strcmp(args[j], "|") == 0) {
+                pipe_index = j;
+                break;
+            }
         }
 
-        execute_command(args, background);
+        if (pipe_index >= 0) {
+            for (int j = 0; j < pipe_index; j++) {
+                cmd1[j] = args[j];
+            }
+            cmd1[pipe_index] = NULL;
+
+            int k = 0;
+            for (int j = pipe_index + 1; j < i; j++) {
+                cmd2[k++] = args[j];
+            }
+            cmd2[k] = NULL;
+
+            execute_pipeline(cmd1, cmd2);
+        } else {
+            // Execute single process command
+            redirect_input_output(input_file, output_file);
+            execute_command(args, background);
+        }
+
+        // Reset variables for the next iteration
+        input_file = NULL;
+        output_file = NULL;
+        background = 0;
     }
 
     return 0;
