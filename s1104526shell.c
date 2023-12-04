@@ -132,7 +132,8 @@ int main() {
     while (1) {
         background = 0;
         printf("s1104526shell> ");
-        gets(input_string);
+        fgets(input_string, sizeof(input_string), stdin);
+        input_string[strcspn(input_string, "\n")] = 0;
         numTokens = string_parser(input_string, tokens);
 
         if (strcmp(tokens[0], "exit") == 0)
