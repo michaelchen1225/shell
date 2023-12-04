@@ -131,11 +131,6 @@ int main() {
             continue;
         }
 
-        if (strcmp(input_buffer, "s1104526") == 0) {
-            execute_s1104526();
-            continue;
-        }
-
         char* next = strchr(input_buffer, '&');
         if (next) {
             background = 1;
@@ -153,6 +148,25 @@ int main() {
         } else {
             pipe = 0;
             string_parser(input_buffer, args);
+        }
+
+        int out = -1;
+        for (int i = 0; args[i] != NULL; i++) {
+            if (strcmp(args[i], ">") == 0) {
+                args[i] = NULL;
+                out = open(args[i + 1], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+                break;
+            }
+        }
+
+        if (out != -1) {
+            dup2(out, STDOUT_FILENO);
+            close(out);
+        }
+
+        if (strcmp(args[0], "s1104526") == 0) {
+            execute_s1104526();
+            continue;
         }
 
         if (pipe) {
