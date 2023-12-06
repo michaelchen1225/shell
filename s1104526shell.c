@@ -25,48 +25,6 @@ size_t string_parser(char* input, char* word_array[]) {
     word_array[n] = NULL;
     return n;
 }
-// Rest of the code...
-
-void execute_command(char** args, int background) {
-    pid_t pid;
-    int status;
-    int out = -1;
-    int in = -1;
-
-    for (int i = 0; args[i] != NULL; i++) {
-        if (strcmp(args[i], ">") == 0) {
-            args[i] = NULL;
-            out = open(args[i + 1], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
-            break;
-        }
-        if (strcmp(args[i], "<") == 0) {
-            args[i] = NULL;
-            in = open(args[i + 1], O_RDONLY);
-            break;
-        }
-    }
-
-    pid = fork();
-    // Rest of the code...
-    if (pid == 0) {
-        if (out != -1) {
-            dup2(out, STDOUT_FILENO);
-            close(out);
-        }
-        if (execvp(args[0], args) == -1) {
-            perror("1104526shell");
-        }
-        exit(EXIT_FAILURE);
-    } else if (pid < 0) {
-        perror("1104526shell");
-    } else {
-        if (!background) {
-            do {
-                waitpid(pid, &status, WUNTRACED);
-            } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-        }
-    }
-}
 
 void execute_command(char** args, int background) {
     pid_t pid;
