@@ -31,6 +31,7 @@ void execute_command(char** args, int background) {
     pid_t pid;
     int status;
     int out = -1;
+    int in = -1;
 
     for (int i = 0; args[i] != NULL; i++) {
         if (strcmp(args[i], ">") == 0) {
@@ -38,7 +39,14 @@ void execute_command(char** args, int background) {
             out = open(args[i + 1], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
             break;
         }
+        if (strcmp(args[i], "<") == 0) {
+            args[i] = NULL;
+            in = open(args[i + 1], O_RDONLY);
+            break;
+        }
     }
+    // Rest of the code...
+}
 
     pid = fork();
     if (pid == 0) {
