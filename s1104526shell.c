@@ -45,10 +45,10 @@ void execute_command(char** args, int background) {
             break;
         }
     }
-    // Rest of the code...
-}
 
     pid = fork();
+    // Rest of the code...
+}
     if (pid == 0) {
         if (out != -1) {
             dup2(out, STDOUT_FILENO);
