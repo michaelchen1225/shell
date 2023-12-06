@@ -4,7 +4,7 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <fcntl.h>
-#include <ctype.h>  // Added this line
+#include <ctype.h> 
 
 #define MAX_LINE 80
 #define MAX_NUM_ARGS 10
@@ -25,21 +25,18 @@ size_t string_parser(char* input, char* word_array[]) {
     word_array[n] = NULL;
     return n;
 }
+// Rest of the code...
 
 void execute_command(char** args, int background) {
     pid_t pid;
     int status;
     int out = -1;
-    int in = -1;
 
     for (int i = 0; args[i] != NULL; i++) {
         if (strcmp(args[i], ">") == 0) {
             args[i] = NULL;
             out = open(args[i + 1], O_WRONLY | O_TRUNC | O_CREAT, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
-        }
-        if (strcmp(args[i], "<") == 0) {
-            args[i] = NULL;
-            in = open(args[i + 1], O_RDONLY);
+            break;
         }
     }
 
@@ -48,10 +45,6 @@ void execute_command(char** args, int background) {
         if (out != -1) {
             dup2(out, STDOUT_FILENO);
             close(out);
-        }
-        if (in != -1) {
-            dup2(in, STDIN_FILENO);
-            close(in);
         }
         if (execvp(args[0], args) == -1) {
             perror("1104526shell");
@@ -64,6 +57,52 @@ void execute_command(char** args, int background) {
             do {
                 waitpid(pid, &status, WUNTRACED);
             } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+        }
+    }
+}
+
+void execute_pipe(char** args, char** args_pipe) {
+    int pipefd[2];
+    pid_t p1, p2;
+
+    if (pipe(pipefd) < 0) {
+        printf("\nPipe could not be initialized");
+        return;
+    }
+    p1 = fork();
+    if (p1 < 0) {
+        printf("\nCould not fork");
+        return;
+    }
+
+    if (p1 == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        if (execvp(args[0], args) < 0) {
+            printf("\nCould not execute command 1..");
+            exit(0);
+        }
+    } else {
+        p2 = fork();
+
+        if (p2 < 0) {
+            printf("\nCould not fork");
+            return;
+        }
+
+        if (p2 == 0) {
+            close(pipefd[1]);
+            dup2(pipefd[0], STDIN_FILENO);
+            close(pipefd[0]);
+            if (execvp(args_pipe[0], args_pipe) < 0) {
+                printf("\nCould not execute command 2..");
+                exit(0);
+            }
+        } else {
+            wait(NULL);
+            wait(NULL);
         }
     }
 }
