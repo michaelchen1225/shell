@@ -177,7 +177,7 @@ int ownCmdHandler(char** parsed){
     return 0; 
 } 
 
-//單指令執行
+//signal handler
 void exec(char** Args){
 	
 	pid_t pid = fork();
@@ -192,7 +192,7 @@ void exec(char** Args){
 	}
 }
 
-//Pipe執行
+//pipe liene
 void pipeline(char** process1, char** process2){
 	int fd[2];
 	//char* buf1 =   malloc(strlen("/bin/")+strlen(process1[0])+1);
@@ -350,8 +350,8 @@ void runBg(char **args){
 
 void main(){
 	char* username = getenv("USER"); 
-    printf("\nWelcome to 1104526shell\n");
-    printf("THE USER IS: @%s", username); 
+    printf("Hello @%s", username);
+    printf("\nWelcome to 1104526shell\n"); 
 	printf("\n"); 
 	
     while (TRUE)
