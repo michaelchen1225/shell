@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <readline/readline.h>
 #include <readline/history.h>
-/* run this program using the console pauser or add your own getch, system("pause") or input loop */
+
 
 #define TRUE 1
 #define MAXLIST 1000
