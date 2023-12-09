@@ -5,9 +5,15 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <ctype.h> 
+#include <ncurses.h>
+
 
 #define MAX_LINE 80
 #define MAX_NUM_ARGS 10
+#define MAX_HISTORY 100
+
+char history[MAX_HISTORY][MAX_LINE];
+int history_index = 0;
 
 size_t string_parser(char* input, char* word_array[]) {
     size_t n = 0;
@@ -118,6 +124,12 @@ void execute_s1104526() {
 }
 
 int main() {
+    // Initialize ncurses
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+
     char input_buffer[MAX_LINE];
     char* args[MAX_NUM_ARGS];
     char* args_pipe[MAX_NUM_ARGS];
@@ -127,10 +139,31 @@ int main() {
 
     printf("\nWelcome to 1104526shell\n");
 
-    while (should_run) {
+   while (should_run) {
         printf("1104526shell> ");
-        fgets(input_buffer, MAX_LINE, stdin);
-        input_buffer[strcspn(input_buffer, "\n")] = 0;
+        int ch = getch();
+
+        switch (ch) {
+            case KEY_UP:
+                if (history_index > 0) {
+                    history_index--;
+                    strcpy(input_buffer, history[history_index]);
+                    printf("\r1104526shell> %s", input_buffer);
+                }
+                break;
+            case KEY_DOWN:
+                if (history_index < MAX_HISTORY - 1 && history[history_index + 1][0] != '\0') {
+                    history_index++;
+                    strcpy(input_buffer, history[history_index]);
+                    printf("\r1104526shell> %s", input_buffer);
+                }
+                break;
+            case '\n':
+                // Add the command to the history
+                strcpy(history[history_index], input_buffer);
+                if (history_index < MAX_HISTORY - 1) {
+                    history_index++;
+                }
 
         if (strcmp(input_buffer, "exit") == 0) {
             should_run = 0;
@@ -186,5 +219,6 @@ int main() {
         dup2(stdout_copy, STDOUT_FILENO);
     }
 
+    endwin();
     return 0;
 }
