@@ -97,10 +97,6 @@ void execute_command(char** args, int background) {
 }
 
 void execute_pipe(char** args, char** args_pipe) {
-    // ... existing code ...
-}
-
-void execute_pipe(char** args, char** args_pipe) {
     int pipefd[2];
     pid_t p1, p2;
 
