@@ -5,6 +5,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <ctype.h> 
+#include <ncurses.h>
 
 #define MAX_LINE 80
 #define MAX_NUM_ARGS 10
@@ -153,13 +154,40 @@ int main() {
     int should_run = 1;
     int background = 0;
     int pipe = 0;
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
 
     printf("\nWelcome to 1104526shell\n");
 
+    int ch;
+    int i = 0;
     while (should_run) {
         printf("1104526shell> ");
-        fgets(input_buffer, MAX_LINE, stdin);
-        input_buffer[strcspn(input_buffer, "\n")] = 0;
+
+        while ((ch = getch()) != '\n' && i < MAX_LINE - 1) {
+            if (ch == KEY_UP) {
+                // Handle Up arrow key...
+                char* previous_command = get_previous_command();
+                if (previous_command != NULL) {
+                    strcpy(input_buffer, previous_command);
+                    printf("%s", input_buffer);
+                }
+            } else if (ch == KEY_DOWN) {
+                // Handle Down arrow key...
+                char* next_command = get_next_command();
+                if (next_command != NULL) {
+                    strcpy(input_buffer, next_command);
+                    printf("%s", input_buffer);
+                }
+            } else {
+                // If it's not a special key, add it to the input buffer
+                input_buffer[i] = ch;
+                i++;
+            }
+        }
+        input_buffer[i] = '\0';   // Null-terminate the string
 
         if (strcmp(input_buffer, "exit") == 0) {
             should_run = 0;
@@ -221,5 +249,6 @@ int main() {
         free(history[i]);
     }
 
+    endwin();
     return 0;
 }
